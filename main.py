@@ -3,7 +3,7 @@ from pyrogram import Client
 from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup,InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
-import bypasser
+import load    
 import os
 import ddl
 import requests
