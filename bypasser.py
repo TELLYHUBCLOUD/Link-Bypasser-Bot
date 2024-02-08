@@ -1,35 +1,35 @@
 import re
-from re import match as rematch, findall, sub as resub
 import requests
-from requests import get as rget
+from curl_cffi import requests as Nreq
 import base64
-from urllib.parse import unquote, urlparse, parse_qs, quote
+from urllib.parse import unquote, urlparse, quote
 import time
 import cloudscraper
 from bs4 import BeautifulSoup, NavigableString, Tag
 from lxml import etree
 import hashlib
 import json
-from dotenv import load_dotenv
-load_dotenv()
 from asyncio import sleep as asleep
-import os
 import ddl
 from cfscrape import create_scraper
-from uuid import uuid4
+from json import load
+from os import environ
+
+with open('config.json', 'r') as f: DATA = load(f)
+def getenv(var): return environ.get(var) or DATA.get(var, None)
 
 
 ##########################################################
 # ENVs
 
-GDTot_Crypt = os.environ.get("CRYPT","b0lDek5LSCt6ZjVRR2EwZnY4T1EvVndqeDRtbCtTWmMwcGNuKy8wYWpDaz0%3D")
-Laravel_Session = os.environ.get("Laravel_Session","")
-XSRF_TOKEN = os.environ.get("XSRF_TOKEN","")
-DCRYPT = os.environ.get("DRIVEFIRE_CRYPT","cnhXOGVQNVlpeFZlM2lvTmN6Z2FPVWJiSjVBbWdVN0dWOEpvR3hHbHFLVT0%3D")
-KCRYPT = os.environ.get("KOLOP_CRYPT","a1V1ZWllTnNNNEZtbkU4Y0RVd3pkRG5UREFJZFlUaC9GRko5NUNpTHNFcz0%3D")
-HCRYPT = os.environ.get("HUBDRIVE_CRYPT","N25hV1pxMXZWUTdFWEh6L2Q2WFJyQWo2NGJEcWN6R2E5ci91aG8zSFF5Zz0%3D")
-KATCRYPT = os.environ.get("KATDRIVE_CRYPT","bzQySHVKSkY0bEczZHlqOWRsSHZCazBkOGFDak9HWXc1emRTL1F6Rm9ubz0%3D")
-
+GDTot_Crypt = getenv("CRYPT")
+Laravel_Session = getenv("Laravel_Session")
+XSRF_TOKEN = getenv("XSRF_TOKEN")
+DCRYPT = getenv("DRIVEFIRE_CRYPT")
+KCRYPT = getenv("KOLOP_CRYPT")
+HCRYPT = getenv("HUBDRIVE_CRYPT")
+KATCRYPT = getenv("KATDRIVE_CRYPT")
+CF = getenv("CLOUDFLARE")
 
 ############################################################
 # Lists
@@ -40,6 +40,16 @@ otherslist = ["exe.io","exey.io","sub2unlock.net","sub2unlock.com","rekonise.com
 gdlist = ["appdrive","driveapp","drivehub","gdflix","drivesharer","drivebit","drivelinks","driveace",
 "drivepro","driveseed"]
 
+
+###############################################################
+# pdisk
+
+def pdisk(url):
+    r = requests.get(url).text
+    try: return r.split("<!-- ")[-1].split(" -->")[0]
+    except:
+        try:return BeautifulSoup(r,"html.parser").find('video').find("source").get("src")
+        except: return None
 
 ###############################################################
 # index scrapper
@@ -128,6 +138,35 @@ def scrapeIndex(url, username="none", password="none"):
     if len(result)==0: return None
     return format(result)
 
+################################################################
+# Shortner Full Page API
+
+def shortner_fpage_api(link):
+    link_pattern = r"https?://[\w.-]+/full\?api=([^&]+)&url=([^&]+)(?:&type=(\d+))?"
+    match = re.match(link_pattern, link)
+    if match:
+        try:
+            url_enc_value = match.group(2)
+            url_value = base64.b64decode(url_enc_value).decode("utf-8")
+            return url_value
+        except BaseException:
+            return None
+    else:
+        return None
+
+# Shortner Quick Link API
+
+def shortner_quick_api(link):
+    link_pattern = r"https?://[\w.-]+/st\?api=([^&]+)&url=([^&]+)"
+    match = re.match(link_pattern, link)
+    if match:
+        try:
+            url_value = match.group(2)
+            return url_value
+        except BaseException:
+            return None
+    else:
+        return None
 
 ##############################################################
 # tnlink
@@ -186,16 +225,38 @@ def try2link_scrape(url):
     
 
 def psa_bypasser(psa_url):
-    client = cloudscraper.create_scraper(allow_brotli=False)
-    r = client.get(psa_url)
+    cookies = {'cf_clearance': CF }
+    headers = {
+        'authority': 'psa.wf',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'accept-language': 'en-US,en;q=0.9',
+        'referer': 'https://psa.wf/',
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36',
+    }
+
+    r = requests.get(psa_url, headers=headers, cookies=cookies)
     soup = BeautifulSoup(r.text, "html.parser").find_all(class_="dropshadowboxes-drop-shadow dropshadowboxes-rounded-corners dropshadowboxes-inside-and-outside-shadow dropshadowboxes-lifted-both dropshadowboxes-effect-default")
-    links = ""
+    links = []
     for link in soup:
         try:
             exit_gate = link.a.get("href")
-            links = links + try2link_scrape(exit_gate) + '\n'
+            if "/exit" in exit_gate:
+                print("scraping :",exit_gate)
+                links.append(try2link_scrape(exit_gate))
         except: pass
-    return links
+
+    finals = ""
+    for li in links:
+        try:
+            res = requests.get(li, headers=headers, cookies=cookies)
+            soup = BeautifulSoup(res.text,"html.parser")
+            name = soup.find("h1",class_="entry-title", itemprop="headline").getText()
+            finals += "**" + name + "**\n\n"
+            soup = soup.find("div", class_="entry-content" ,itemprop="text").findAll("a")
+            for ele in soup: finals += "○ " + ele.get("href") + "\n"
+            finals += "\n\n"
+        except: finals += li + "\n\n"
+    return finals
 
 
 ##################################################################################################################
@@ -263,14 +324,12 @@ def bypassBluemediafiles(url, torrent=False):
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-
     }
 
     res = requests.get(url, headers=headers)
     soup = BeautifulSoup(res.text, 'html.parser')
     script = str(soup.findAll('script')[3])
     encodedKey = script.split('Create_Button("')[1].split('");')[0]
-
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0',
@@ -299,7 +358,6 @@ def bypassBluemediafiles(url, torrent=False):
         if "mega.nz" in furl:
             furl = furl.replace("mega.nz/%23!","mega.nz/file/").replace("!","#")
 
-    #print(furl)
     return furl
 
 def igggames(url):
@@ -308,22 +366,35 @@ def igggames(url):
     soup = soup.find("div",class_="uk-margin-medium-top").findAll("a")
 
     bluelist = []
-    for ele in soup:
-        bluelist.append(ele.get('href'))
-    bluelist = bluelist[6:-1]
+    for ele in soup: bluelist.append(ele.get('href'))
+    bluelist = bluelist[3:-1]
 
     links = ""
+    last  = None
+    fix = True
     for ele in bluelist:
-        if "bluemediafiles" in ele:
-            links = links + bypassBluemediafiles(ele) + "\n"
+        if ele == "https://igg-games.com/how-to-install-a-pc-game-and-update.html": 
+            fix = False
+            links += "\n"
+        if "bluemediafile" in ele:
+            tmp = bypassBluemediafiles(ele)
+            if fix:
+                tt = tmp.split("/")[2]
+                if last is not None and tt != last: links += "\n"
+                last = tt
+            links = links + "○ " + tmp + "\n"
         elif "pcgamestorrents.com" in ele:
             res = requests.get(ele)
             soup = BeautifulSoup(res.text,"html.parser")
             turl = soup.find("p",class_="uk-card uk-card-body uk-card-default uk-card-hover").find("a").get("href")
-            links = links + bypassBluemediafiles(turl,True) + "\n"
-        else:
-            links = links + ele + "\n"
-
+            links = links + "🧲 `" + bypassBluemediafiles(turl,True) + "`\n\n"
+        elif ele != "https://igg-games.com/how-to-install-a-pc-game-and-update.html":
+            if fix:
+                tt = ele.split("/")[2]
+                if last is not None and tt != last: links += "\n"
+                last = tt
+            links = links + "○ " + ele + "\n"
+       
     return links[:-1]
 
 
@@ -353,13 +424,13 @@ def htpmovies(link):
 
 def scrappers(link):
  
-    try: link = rematch(r"((http|https)\:\/\/)?[a-zA-Z0-9\.\/\?\:@\-_=#]+\.([a-zA-Z]){2,6}([a-zA-Z0-9\.\&\/\?\:@\-_=#])*", link)[0]
+    try: link = re.match(r"((http|https)\:\/\/)?[a-zA-Z0-9\.\/\?\:@\-_=#]+\.([a-zA-Z]){2,6}([a-zA-Z0-9\.\&\/\?\:@\-_=#])*", link)[0]
     except TypeError: return 'Not a Valid Link.'
     links = []
 
     if "sharespark" in link:
         gd_txt = ""
-        res = rget("?action=printpage;".join(link.split('?')))
+        res = requests.get("?action=printpage;".join(link.split('?')))
         soup = BeautifulSoup(res.text, 'html.parser')
         for br in soup.findAll('br'):
             next_s = br.nextSibling
@@ -369,10 +440,10 @@ def scrappers(link):
             if next2_s and isinstance(next2_s,Tag) and next2_s.name == 'br':
               text = str(next_s).strip()
               if text:
-                  result = resub(r'(?m)^\(https://i.*', '', next_s)
-                  star = resub(r'(?m)^\*.*', ' ', result)
-                  extra = resub(r'(?m)^\(https://e.*', ' ', star)
-                  gd_txt += ', '.join(findall(r'(?m)^.*https://new1.gdtot.cfd/file/[0-9][^.]*', next_s)) + "\n\n"
+                  result = re.sub(r'(?m)^\(https://i.*', '', next_s)
+                  star = re.sub(r'(?m)^\*.*', ' ', result)
+                  extra = re.sub(r'(?m)^\(https://e.*', ' ', star)
+                  gd_txt += ', '.join(re.findall(r'(?m)^.*https://new1.gdtot.cfd/file/[0-9][^.]*', next_s)) + "\n\n"
         return gd_txt
   
     elif "htpmovies" in link and "/exit.php" in link:
@@ -381,7 +452,7 @@ def scrappers(link):
     elif "htpmovies" in link:
         prsd = ""
         links = []
-        res = rget(link)
+        res = requests.get(link)
         soup = BeautifulSoup(res.text, 'html.parser')
         x = soup.select('a[href^="/exit.php?url="]')
         y = soup.select('h5')
@@ -403,23 +474,23 @@ def scrappers(link):
     elif "cinevood" in link:
         prsd = ""
         links = []
-        res = rget(link)
+        res = requests.get(link)
         soup = BeautifulSoup(res.text, 'html.parser')
         x = soup.select('a[href^="https://kolop.icu/file"]')
         for a in x:
             links.append(a['href'])
         for o in links:
-            res = rget(o)
+            res = requests.get(o)
             soup = BeautifulSoup(res.content, "html.parser")
             title = soup.title.string
-            reftxt = resub(r'Kolop \| ', '', title)
+            reftxt = re.sub(r'Kolop \| ', '', title)
             prsd += f'{reftxt}\n{o}\n\n'
         return prsd
 
     elif "atishmkv" in link:
         prsd = ""
         links = []
-        res = rget(link)
+        res = requests.get(link)
         soup = BeautifulSoup(res.text, 'html.parser')
         x = soup.select('a[href^="https://gdflix.top/file"]')
         for a in x:
@@ -430,13 +501,13 @@ def scrappers(link):
 
     elif "teluguflix" in link:
         gd_txt = ""
-        r = rget(link)
+        r = requests.get(link)
         soup = BeautifulSoup (r.text, "html.parser")
         links = soup.select('a[href*="gdtot"]')
         gd_txt = f"Total Links Found : {len(links)}\n\n"
         for no, link in enumerate(links, start=1):
             gdlk = link['href']
-            t = rget(gdlk)
+            t = requests.get(gdlk)
             soupt = BeautifulSoup(t.text, "html.parser")
             title = soupt.select('meta[property^="og:description"]')
             gd_txt += f"{no}. <code>{(title[0]['content']).replace('Download ' , '')}</code>\n{gdlk}\n\n"
@@ -445,13 +516,13 @@ def scrappers(link):
     
     elif "taemovies" in link:
         gd_txt, no = "", 0
-        r = rget(link)
+        r = requests.get(link)
         soup = BeautifulSoup (r.text, "html.parser")
         links = soup.select('a[href*="shortingly"]')
         gd_txt = f"Total Links Found : {len(links)}\n\n"
         for a in links:
             glink = rocklinks(a["href"]) 
-            t = rget(glink)
+            t = requests.get(glink)
             soupt = BeautifulSoup(t.text, "html.parser")
             title = soupt.select('meta[property^="og:description"]')
             no += 1
@@ -460,15 +531,15 @@ def scrappers(link):
     
     elif "toonworld4all" in link:
         gd_txt, no = "", 0
-        r = rget(link)
+        r = requests.get(link)
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.select('a[href*="redirect/main.php?"]')
         for a in links:
-            down = rget(a['href'], stream=True, allow_redirects=False)
+            down = requests.get(a['href'], stream=True, allow_redirects=False)
             link = down.headers["location"]
             glink = rocklinks(link)
             if glink and "gdtot" in glink:
-                t = rget(glink)
+                t = requests.get(glink)
                 soupt = BeautifulSoup(t.text, "html.parser")
                 title = soupt.select('meta[property^="og:description"]')
                 no += 1
@@ -477,14 +548,14 @@ def scrappers(link):
     
     elif "animeremux" in link:
         gd_txt, no = "", 0
-        r = rget(link)
+        r = requests.get(link)
         soup = BeautifulSoup (r.text, "html.parser")
         links = soup.select('a[href*="urlshortx.com"]')
         gd_txt = f"Total Links Found : {len(links)}\n\n"
         for a in links:
             link = a["href"]
             x = link.split("url=")[-1]
-            t = rget(x)
+            t = requests.get(x)
             soupt = BeautifulSoup(t.text, "html.parser")
             title = soupt.title
             no += 1
@@ -493,7 +564,7 @@ def scrappers(link):
         return gd_txt
 
     else:
-        res = rget(link)
+        res = requests.get(link)
         soup = BeautifulSoup(res.text, 'html.parser')
         mystx = soup.select(r'a[href^="magnet:?xt=urn:btih:"]')
         for hy in mystx:
@@ -855,7 +926,7 @@ def zippyshare(url):
 ####################################################
 # filercrypt
 
-def getlinks(dlc,client):
+def getlinks(dlc):
     headers = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0',
     'Accept': 'application/json, text/javascript, */*',
@@ -870,10 +941,10 @@ def getlinks(dlc,client):
         'content': dlc,
     }
 
-    response = client.post('http://dcrypt.it/decrypt/paste', headers=headers, data=data).json()["success"]["links"]
+    response = requests.post('http://dcrypt.it/decrypt/paste', headers=headers, data=data).json()["success"]["links"]
     links = ""
     for link in response:
-        links = links + link + "\n"
+        links = links + link + "\n\n"
     return links[:-1]
 
 
@@ -886,21 +957,11 @@ def filecrypt(url):
     "accept-language": "en-US,en;q=0.9",
     "cache-control": "max-age=0",
     "content-type": "application/x-www-form-urlencoded",
-    "dnt": "1",
     "origin": "https://filecrypt.co",
     "referer": url,
-    "sec-ch-ua": '"Google Chrome";v="105", "Not)A;Brand";v="8", "Chromium";v="105"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": "Windows",
-    "sec-fetch-dest": "document",
-    "sec-fetch-mode": "navigate",
-    "sec-fetch-site": "same-origin",
-    "sec-fetch-user": "?1",
-    "upgrade-insecure-requests": "1",
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36" 
     }
     
-
     resp = client.get(url, headers=headers)
     soup = BeautifulSoup(resp.content, "html.parser")
 
@@ -912,7 +973,7 @@ def filecrypt(url):
             break
 
     resp = client.get(dlclink,headers=headers)
-    return getlinks(resp.text,client)
+    return getlinks(resp.text)
 
 
 #####################################################
@@ -926,10 +987,20 @@ def dropbox(url):
 # shareus
 
 def shareus(url):
-    token = url.split("=")[-1]
-    bypassed_url = "https://us-central1-my-apps-server.cloudfunctions.net/r?shortid="+ token
-    response = requests.get(bypassed_url).text
-    return response
+    headers = {'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',}
+    DOMAIN = "https://us-central1-my-apps-server.cloudfunctions.net"
+    sess = requests.session()
+
+    code = url.split("/")[-1]
+    params = {'shortid': code, 'initial': 'true', 'referrer': 'https://shareus.io/',}
+    response = requests.get(f'{DOMAIN}/v', params=params, headers=headers)
+
+    for i in range(1,4):
+        json_data = {'current_page': i,}
+        response = sess.post(f'{DOMAIN}/v', headers=headers, json=json_data)
+
+    response = sess.get(f'{DOMAIN}/get_link', headers=headers).json()
+    return response["link_info"]["destination"]
 
 
 #######################################################
@@ -957,7 +1028,7 @@ def shortingly(url):
 # Gyanilinks - gtlinks.me
 
 def gyanilinks(url):
-    DOMAIN = "https://go.theforyou.in/"
+    DOMAIN = "https://go.hipsonyc.com/"
     client = cloudscraper.create_scraper(allow_brotli=False)
     url = url[:-1] if url[-1] == '/' else url
     code = url.split("/")[-1]
@@ -1213,7 +1284,7 @@ def gdtot(url):
                 "GET", f"{p_url.scheme}://{p_url.hostname}/ddl/{url.split('/')[-1]}")
         except Exception as e:
             return (f'ERROR: {e.__class__.__name__}')
-        if (drive_link := findall(r"myDl\('(.*?)'\)", res.text)) and "drive.google.com" in drive_link[0]:
+        if (drive_link := re.findall(r"myDl\('(.*?)'\)", res.text)) and "drive.google.com" in drive_link[0]:
             return drive_link[0]
         else:
             return (
@@ -1224,7 +1295,7 @@ def gdtot(url):
     except Exception as e:
         return (
             f'ERROR: {e.__class__.__name__} with {token_url}')
-    path = findall('\("(.*?)"\)', token_page.text)
+    path = re.findall('\("(.*?)"\)', token_page.text)
     if not path:
         return ('ERROR: Cannot bypass this')
     path = path[0]
@@ -1346,13 +1417,12 @@ def others(url):
 
 # RECAPTCHA v3 BYPASS
 # code from https://github.com/xcscxr/Recaptcha-v3-bypass
-def RecaptchaV3(ANCHOR_URL="https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x&co=aHR0cHM6Ly9vdW8uaW86NDQz&hl=en&v=1B_yv3CBEV10KtI2HJ6eEXhJ&size=invisible&cb=4xnsug1vufyr"):
+def RecaptchaV3():
+    ANCHOR_URL = 'https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x&co=aHR0cHM6Ly9vdW8ucHJlc3M6NDQz&hl=en&v=pCoGBhjs9s8EhFOHJFe8cqis&size=invisible&cb=ahgyd1gkfkhe'
     url_base = 'https://www.google.com/recaptcha/'
     post_data = "v={}&reason=q&c={}&k={}&co={}"
     client = requests.Session()
-    client.headers.update({
-        'content-type': 'application/x-www-form-urlencoded'
-    })
+    client.headers.update({'content-type': 'application/x-www-form-urlencoded'})
     matches = re.findall('([api2|enterprise]+)\/anchor\?(.*)', ANCHOR_URL)[0]
     url_base += matches[0]+'/'
     params = matches[1]
@@ -1367,30 +1437,24 @@ def RecaptchaV3(ANCHOR_URL="https://www.google.com/recaptcha/api2/anchor?ar=1&k=
 
 # code from https://github.com/xcscxr/ouo-bypass/
 def ouo(url):
-    client = requests.Session()
     tempurl = url.replace("ouo.press", "ouo.io")
     p = urlparse(tempurl)
     id = tempurl.split('/')[-1]
-    
-    res = client.get(tempurl)
+    client = Nreq.Session(headers={'authority': 'ouo.io', 'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8', 'cache-control': 'max-age=0', 'referer': 'http://www.google.com/ig/adde?moduleurl=', 'upgrade-insecure-requests': '1'})
+    res = client.get(tempurl, impersonate="chrome110")
     next_url = f"{p.scheme}://{p.hostname}/go/{id}"
 
     for _ in range(2):
-        if res.headers.get('Location'):
-            break
+        if res.headers.get('Location'): break
         bs4 = BeautifulSoup(res.content, 'lxml')
         inputs = bs4.form.findAll("input", {"name": re.compile(r"token$")})
         data = { input.get('name'): input.get('value') for input in inputs }
-        
-        ans = RecaptchaV3()
-        data['x-token'] = ans
-        h = {
-            'content-type': 'application/x-www-form-urlencoded'
-        }
-        res = client.post(next_url, data=data, headers=h, allow_redirects=False)
+        data['x-token'] = RecaptchaV3()
+        header = {'content-type': 'application/x-www-form-urlencoded'}
+        res = client.post(next_url, data=data, headers=header,allow_redirects=False, impersonate="chrome110")
         next_url = f"{p.scheme}://{p.hostname}/xreallcygo/{id}"
 
-    return res.headers.get('Location')
+    return  res.headers.get('Location')
 
 
 ####################################################################################################################        
@@ -1442,7 +1506,7 @@ def unified(url):
         info = re.findall(">(.*?)<\/li>", res.text)
         info_parsed = {}
         for item in info:
-            kv = [s.strip() for s in item.split(":", maxsplit=1)]
+            kv = [s.strip() for s in item.split(": ", maxsplit=1)]
             info_parsed[kv[0].lower()] = kv[1]
         info_parsed = info_parsed
         info_parsed["error"] = False
@@ -1565,7 +1629,7 @@ def xpshort(url):
     url = url[:-1] if url[-1] == '/' else url
     code = url.split("/")[-1]
     final_url = f"{DOMAIN}/{code}"
-    ref = "https://m.ecowas.in/"
+    ref = "https://www.animalwallpapers.online/"
     h = {"referer": ref}
     resp = client.get(final_url,headers=h)
     soup = BeautifulSoup(resp.content, "html.parser")
@@ -1576,6 +1640,67 @@ def xpshort(url):
     r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
     try: return r.json()['url']
     except: return "Something went wrong :("
+
+
+####################################################################################################
+# Vnshortner- 
+
+def vnshortener(url):
+    sess = requests.session()
+    DOMAIN = "https://vnshortener.com/"
+    org = "https://nishankhatri.xyz"
+    PhpAcc = DOMAIN + "link/new.php"
+    ref = "https://nishankhatri.com.np/"
+    go = DOMAIN + "links/go"
+
+    code = url.split("/")[3]
+    final_url = f"{DOMAIN}/{code}/"
+    headers = {'authority': DOMAIN, 'origin': org}
+
+    data = {'step_1': code,}
+    response = sess.post(PhpAcc, headers=headers, data=data).json()
+    id = response["inserted_data"]["id"]
+    data = {'step_2': code, 'id': id,}
+    response = sess.post(PhpAcc, headers=headers, data=data).json()
+    
+    headers['referer'] = ref
+    params = {'sid': str(id)}
+    resp = sess.get(final_url, params=params, headers=headers)
+    soup = BeautifulSoup(resp.content, "html.parser")
+    inputs = soup.find_all("input")
+    data = { input.get('name'): input.get('value') for input in inputs }
+
+    time.sleep(1)
+    headers['x-requested-with'] = 'XMLHttpRequest'
+    try:
+        r = sess.post(go, data=data, headers=headers).json()
+        if r["status"] == "success": return r["url"]
+        else: raise
+    except: return "Something went wrong :("
+
+
+#####################################################################################################
+# onepagelink
+
+def onepagelink(url):
+    client = cloudscraper.create_scraper(allow_brotli=False)
+    DOMAIN = "go.onepagelink.in"
+    url = url[:-1] if url[-1] == "/" else url
+    code = url.split("/")[-1]
+    final_url = f"https://{DOMAIN}/{code}"
+    ref = "https://gorating.in/"
+    h = {"referer": ref}
+    response = client.get(final_url, headers=h)
+    soup = BeautifulSoup(response.text, "html.parser")
+    inputs = soup.find_all("input")
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(5)
+    r = client.post(f"https://{DOMAIN}/links/go", data=data, headers=h)
+    try:
+        return r.json()["url"]
+    except BaseException:
+        return "Something went wrong :("
 
 
 #####################################################################################################
@@ -1596,25 +1721,29 @@ def dulink(url):
     try: return r.json()['url']
     except: return "Something went wrong :("
 
+
 #####################################################################################################
 # krownlinks
 
 def krownlinks(url):
-    client = requests.session()
-    DOMAIN = "https://tech.bloggertheme.xyz"
-    url = url[:-1] if url[-1] == '/' else url
+    client = cloudscraper.create_scraper(allow_brotli=False)
+    DOMAIN = "https://go.hostadviser.net/"
+    url = url[:-1] if url[-1] == "/" else url
     code = url.split("/")[-1]
     final_url = f"{DOMAIN}/{code}"
-    resp = client.get(final_url)
+    ref = "blog.hostadviser.net/"
+    h = {"referer": ref}
+    resp = client.get(final_url, headers=h)
     soup = BeautifulSoup(resp.content, "html.parser")
-    try: inputs = soup.find(id="go-link").find_all(name="input")
-    except: return "Incorrect Link"
-    data = { input.get('name'): input.get('value') for input in inputs }
-    h = { "x-requested-with": "XMLHttpRequest" }
-    time.sleep(10)
+    inputs = soup.find_all("input")
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(8)
     r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
-    try: return r.json()['url']
-    except: return "Something went wrong :("
+    try:
+        return str(r.json()["url"])
+    except BaseException:
+        return "Something went wrong :("
 
 
 ####################################################################################################
@@ -1712,7 +1841,30 @@ def moneykamalo(url):
     url = url[:-1] if url[-1] == '/' else url
     code = url.split("/")[-1]
     final_url = f"{DOMAIN}/{code}"
-    ref = "https://techkeshri.com/"
+    ref = "https://bloging.techkeshri.com/"
+    h = {"referer": ref}
+    resp = client.get(final_url,headers=h)
+    soup = BeautifulSoup(resp.content, "html.parser")
+    inputs = soup.find_all("input")
+    data = { input.get('name'): input.get('value') for input in inputs }
+    h = { "x-requested-with": "XMLHttpRequest" }
+    time.sleep(5)
+    r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
+    try:
+        return r.json()['url']
+    except: return "Something went wrong :("
+	    
+
+##################################################################################################### 
+# lolshort
+
+def lolshort(url):
+    client = requests.session()
+    DOMAIN = "https://get.lolshort.tech/"
+    url = url[:-1] if url[-1] == '/' else url
+    code = url.split("/")[-1]
+    final_url = f"{DOMAIN}/{code}"
+    ref = "https://tech.animezia.com/"
     h = {"referer": ref}
     resp = client.get(final_url,headers=h)
     soup = BeautifulSoup(resp.content, "html.parser")
@@ -1819,21 +1971,47 @@ def mdiskpro(url):
 
 def tnshort(url):
     client = cloudscraper.create_scraper(allow_brotli=False)
-    DOMAIN = "https://page.tnlink.in/"
-    url = url[:-1] if url[-1] == '/' else url
+    DOMAIN = "https://go.tnshort.net/"
+    url = url[:-1] if url[-1] == "/" else url
     code = url.split("/")[-1]
     final_url = f"{DOMAIN}/{code}"
-    ref = "https://business.usanewstoday.club/"
+    ref = "https://jrlinks.in/"
     h = {"referer": ref}
-    resp = client.get(final_url,headers=h)
+    resp = client.get(final_url, headers=h)
     soup = BeautifulSoup(resp.content, "html.parser")
     inputs = soup.find_all("input")
-    data = { input.get('name'): input.get('value') for input in inputs }
-    h = { "x-requested-with": "XMLHttpRequest" }
-    time.sleep(8)
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(9)
     r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
-    try: return r.json()['url']
-    except: return "Something went wrong :("
+    try:
+        return str(r.json()["url"])
+    except BaseException:
+        return "Something went wrong :("
+
+#####################################################################################################
+# tnvalue
+
+def tnvalue(url):
+    client = cloudscraper.create_scraper(allow_brotli=False)
+    DOMAIN = "https://gadgets.webhostingtips.club/"
+    url = url[:-1] if url[-1] == "/" else url
+    code = url.split("/")[-1]
+    final_url = f"{DOMAIN}/{code}"
+    ref = "https://earnme.club/"
+    h = {"referer": ref}
+    resp = client.get(final_url, headers=h)
+    soup = BeautifulSoup(resp.content, "html.parser")
+    inputs = soup.find_all("input")
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(12)
+    r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
+    try:
+        return str(r.json()["url"])
+    except BaseException:
+        return "Something went wrong :("
+
 
 
 #####################################################################################################
@@ -1885,13 +2063,55 @@ def mdisklink(url):
 
 def rslinks(url):
       client = requests.session()
-      download = rget(url, stream=True, allow_redirects=False)
+      download = requests.get(url, stream=True, allow_redirects=False)
       v = download.headers["location"]
       code = v.split('ms9')[-1]
       final = f"http://techyproio.blogspot.com/p/short.html?{code}=="
       try: return final
       except: return "Something went wrong :("
 
+#########################
+# vipurl
+def vipurl(url):
+    client = cloudscraper.create_scraper(allow_brotli=False)
+    DOMAIN = "https://count.vipurl.in/"
+    url = url[:-1] if url[-1] == "/" else url
+    code = url.split("/")[-1]
+    final_url = f"{DOMAIN}/{code}"
+    ref = "https://ezeviral.com/"
+    h = {"referer": ref}
+    response = client.get(final_url, headers=h)
+    soup = BeautifulSoup(response.text, "html.parser")
+    inputs = soup.find_all("input")
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(9)
+    r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
+    try:
+        return r.json()["url"]
+    except BaseException:
+        return "Something went wrong :("
+##################################################################################################### 
+#mdisky.link
+def mdisky(url):
+    client = cloudscraper.create_scraper(allow_brotli=False)
+    DOMAIN = "https://go.bloggingaro.com/"
+    url = url[:-1] if url[-1] == "/" else url
+    code = url.split("/")[-1]
+    final_url = f"{DOMAIN}/{code}"
+    ref = "https://www.bloggingaro.com/"
+    h = {"referer": ref}
+    resp = client.get(final_url, headers=h)
+    soup = BeautifulSoup(resp.content, "html.parser")
+    inputs = soup.find_all("input")
+    data = {input.get("name"): input.get("value") for input in inputs}
+    h = {"x-requested-with": "XMLHttpRequest"}
+    time.sleep(6)
+    r = client.post(f"{DOMAIN}/links/go", data=data, headers=h)
+    try:
+        return str(r.json()["url"])
+    except BaseException:
+        return "Something went wrong :("
 
 ##################################################################################################### 
 # bitly + tinyurl
@@ -1923,15 +2143,22 @@ def ispresent(inlist,url):
 
 # shortners
 def shortners(url):
+    # Shortner Full Page API
+    if val := shortner_fpage_api(url):
+        return val
+
+    # Shortner Quick Link API
+    elif val := shortner_quick_api(url):
+        return val
     
     # igg games
-    if "https://igg-games.com/" in url:
-        print("entered igg:",url)
+    elif "https://igg-games.com/" in url:
+        print("entered igg: ",url)
         return igggames(url)
 
     # ola movies
     elif "https://olamovies." in url:
-        print("entered ola movies:",url) 
+        print("entered ola movies: ",url) 
         return olamovies(url)
         
     # katdrive
@@ -1939,7 +2166,7 @@ def shortners(url):
         if KATCRYPT == "":
             return "🚫 __You can't use this because__ **KATDRIVE_CRYPT** __ENV is not set__"
         
-        print("entered katdrive:",url)
+        print("entered katdrive: ",url)
         return katdrive_dl(url, KATCRYPT)
 
     # kolop
@@ -1947,7 +2174,7 @@ def shortners(url):
         if KCRYPT  == "":
             return "🚫 __You can't use this because__ **KOLOP_CRYPT** __ENV is not set__"
         
-        print("entered kolop:",url)
+        print("entered kolop: ",url)
         return kolop_dl(url, KCRYPT)
 
     # hubdrive
@@ -1955,7 +2182,7 @@ def shortners(url):
         if HCRYPT == "":
             return "🚫 __You can't use this because__ **HUBDRIVE_CRYPT** __ENV is not set__"
  
-        print("entered hubdrive:",url)
+        print("entered hubdrive: ",url)
         return hubdrive_dl(url, HCRYPT)
 
     # drivefire
@@ -1963,47 +2190,57 @@ def shortners(url):
         if DCRYPT == "":
             return "🚫 __You can't use this because__ **DRIVEFIRE_CRYPT** __ENV is not set__"
 
-        print("entered drivefire:",url)
+        print("entered drivefire: ",url)
         return drivefire_dl(url, DCRYPT)
         
     # filecrypt
     elif (("https://filecrypt.co/") in url or ("https://filecrypt.cc/" in url)):
-        print("entered filecrypt:",url)
+        print("entered filecrypt: ",url)
         return filecrypt(url)
         
     # shareus
-    elif "shareus.io" in url or "shareus.in" in url:
-        print("entered shareus:",url)
+    elif "https://shareus." in url or "https://shrs.link/" in url:
+        print("entered shareus: ",url)
         return shareus(url)
         
     # shortingly
     elif "https://shortingly.in/" in url:
-        print("entered shortingly:",url)
+        print("entered shortingly: ",url)
         return shortingly(url)
+
+    # vnshortner
+    elif "https://vnshortener.com/" in url:
+        print("entered vnshortener: ",url)
+        return vnshortener(url)
+    
+    # onepagelink
+    elif "https://onepagelink.in/" in url:
+        print("entered onepagelink: ",url)
+        return onepagelink(url)
 
     # gyanilinks
     elif "https://gyanilinks.com/" in url or "https://gtlinks.me/" in url:
-        print("entered gyanilinks:",url)
+        print("entered gyanilinks: ",url)
         return gyanilinks(url)
 
     # flashlink
     elif "https://go.flashlink.in" in url:
-        print("entered flashlink:",url)
+        print("entered flashlink: ",url)
         return flashl(url)
 
     # short2url
     elif "https://short2url.in/" in url:
-        print("entered short2url:",url)
+        print("entered short2url: ",url)
         return short2url(url)
         
     # shorte
     elif "https://shorte.st/" in url:
-        print("entered shorte:",url)
+        print("entered shorte: ",url)
         return sh_st_bypass(url)
         
     # psa
-    elif "https://psa.pm/" in url:
-        print("entered psa:",url)
+    elif "https://psa.wf/" in url:
+        print("entered psa: ",url)
         return psa_bypasser(url)
         
     # sharer pw
@@ -2011,169 +2248,194 @@ def shortners(url):
         if XSRF_TOKEN == "" or Laravel_Session == "":
             return "🚫 __You can't use this because__ **XSRF_TOKEN** __and__ **Laravel_Session** __ENV is not set__"
        
-        print("entered sharer:",url)
+        print("entered sharer: ",url)
         return sharer_pw(url, Laravel_Session, XSRF_TOKEN)
 
     # gdtot url
     elif "gdtot.cfd" in url:
-        print("entered gdtot:",url)
+        print("entered gdtot: ",url)
         return gdtot(url)
         
     # adfly
     elif "https://adf.ly/" in url:
-        print("entered adfly:",url)
+        print("entered adfly: ",url)
         out = adfly(url)
         return out['bypassed_url']
  
     # gplinks
     elif "https://gplinks.co/" in url:
-        print("entered gplink:",url)
+        print("entered gplink: ",url)
         return gplinks(url)
         
     # droplink
     elif "https://droplink.co/" in url:
-        print("entered droplink:",url)
+        print("entered droplink: ",url)
         return droplink(url)
         
     # linkvertise
     elif "https://linkvertise.com/" in url:
-        print("entered linkvertise:",url)
+        print("entered linkvertise: ",url)
         return linkvertise(url)
         
     # rocklinks
     elif "https://rocklinks.net/" in url:
-        print("entered rocklinks:",url)
+        print("entered rocklinks: ",url)
         return rocklinks(url)
         
     # ouo
-    elif "https://ouo.press/" in url:
-        print("entered ouo:",url)
+    elif "https://ouo.press/" in url or "https://ouo.io/" in url:
+        print("entered ouo: ",url)
         return ouo(url)
 
     # try2link
     elif "https://try2link.com/" in url:
-        print("entered try2links:",url)
+        print("entered try2links: ",url)
         return try2link_bypass(url)
 
     # urlsopen
     elif "https://urlsopen." in url:
-        print("entered urlsopen:",url)
+        print("entered urlsopen: ",url)
         return urlsopen(url)
 
     # xpshort
     elif "https://xpshort.com/" in url or "https://push.bdnewsx.com/" in url or "https://techymozo.com/" in url:
-        print("entered xpshort:",url)
+        print("entered xpshort: ",url)
         return xpshort(url)
 
     # dulink
     elif "https://du-link.in/" in url:
-        print("entered dulink:",url)
+        print("entered dulink: ",url)
         return dulink(url)
 
     # ez4short
     elif "https://ez4short.com/" in url:
-        print("entered ez4short:",url)
+        print("entered ez4short: ",url)
         return ez4(url)
     
     # krownlinks
     elif "https://krownlinks.me/" in url:
-        print("entered krownlinks:",url)
+        print("entered krownlinks: ",url)
         return krownlinks(url)
     
     # adrinolink
     elif "https://adrinolinks." in url:
-        print("entered adrinolink:",url)
+        print("entered adrinolink: ",url)
         return adrinolink(url)
     
     # tnlink
     elif "https://link.tnlink.in/" in url:
-        print("entered tnlink:",url)
+        print("entered tnlink: ",url)
         return tnlink(url)
 
     # mdiskshortners
     elif "https://mdiskshortners.in/" in url:
-        print("entered mdiskshortners:",url)
+        print("entered mdiskshortners: ",url)
         return mdiskshortners(url)
 
     # tinyfy
     elif "tinyfy.in" in url:
-        print("entered tinyfy:",url)
+        print("entered tinyfy: ",url)
         return tiny(url)
 
     # earnl
     elif "go.earnl.xyz" in url:
-        print("entered earnl:",url)
+        print("entered earnl: ",url)
         return earnl(url)
 
     # moneykamalo
     elif "earn.moneykamalo.com" in url:
-        print("entered moneykamalo:",url)
+        print("entered moneykamalo: ",url)
         return moneykamalo(url)
-
+	    
+    # lolshort
+    elif "http://go.lolshort.tech/" in url or "https://go.lolshort.tech/" in url:
+        print("entered lolshort: ",url)
+        return lolshort(url)
+	    
     # easysky
     elif "m.easysky.in" in url:
-        print("entered easysky:",url)
+        print("entered easysky: ",url)
         return easysky(url)
 
     # indiurl
     elif "go.indiurl.in.net" in url:
-        print("entered indiurl:",url)
+        print("entered indiurl: ",url)
         return indi(url)
 
     # linkbnao
     elif "linkbnao.com" in url:
-        print("entered linkbnao:",url)
+        print("entered linkbnao: ",url)
         return linkbnao(url)
 
     # omegalinks
     elif "mdisk.pro" in url:
-        print("entered mdiskpro:",url)
+        print("entered mdiskpro: ",url)
         return mdiskpro(url)
 
     # tnshort
-    elif "tnshort.in" in url:
-        print("entered tnshort:",url)
+    elif "https://link.tnshort.net/" in url:
+        print("entered tnshort:", url)
         return tnshort(url)
+
+    # tnvalue
+    elif "https://link.tnvalue.in/" in url or "https://short.tnvalue.in/" in url or "https://page.finclub.in/" in url:
+        print("entered tnvalue:", url)
+        return tnvalue(url)
 
     # indianshortner
     elif "indianshortner.in" in url:
-        print("entered indianshortner:",url)
+        print("entered indianshortner: ",url)
         return indshort(url)
 
     # mdisklink
     elif "mdisklink.link" in url:
-        print("entered mdisklink:",url)
+        print("entered mdisklink: ",url)
         return mdisklink(url)
 
     # rslinks
     elif "rslinks.net" in url:
-        print("entered rslinks:",url)
+        print("entered rslinks: ",url)
         return rslinks(url)
 
     # bitly + tinyurl
     elif "bit.ly" in url or "tinyurl.com" in url:
-        print("entered bitly_tinyurl:",url)
+        print("entered bitly_tinyurl: ",url)
         return bitly_tinyurl(url)
+
+    # pdisk
+    elif "pdisk.pro" in url:
+        print("entered pdisk: ",url)
+        return pdisk(url)
 
     # thinfi
     elif "thinfi.com" in url:
-        print("entered thinfi:",url)
+        print("entered thinfi: ",url)
         return thinfi(url)
+
+    # vipurl
+    elif "link.vipurl.in" in url or "count.vipurl.in" in url or "vipurl.in" in url:
+        print("entered vipurl:",url)
+        return vipurl(url)
+
+    # mdisky
+    elif "mdisky.link" in url:
+        print("entered mdisky:", url)
+        return mdisky(url)
         
     # htpmovies sharespark cinevood
     elif "https://htpmovies." in url or 'https://sharespark.me/' in url or "https://cinevood." in url or "https://atishmkv." in url \
         or "https://teluguflix" in url or 'https://taemovies' in url or "https://toonworld4all" in url or "https://animeremux" in url:
-        print("entered htpmovies sharespark cinevood atishmkv:",url)
+        print("entered htpmovies sharespark cinevood atishmkv: ",url)
         return scrappers(url)
 
     # gdrive look alike
     elif ispresent(gdlist,url):
-        print("entered gdrive look alike:",url)
+        print("entered gdrive look alike: ",url)
         return unified(url)
 
     # others
     elif ispresent(otherslist,url):
-        print("entered others:",url)
+        print("entered others: ",url)
         return others(url)
 
     # else
