@@ -13,4 +13,7 @@
     "TERA_COOKIE": "",
     "CLOUDFLARE": "",
     "PORT": 80
+    "DB_API": "PxN6oV2kEkijLpdsSS1Mn-P2J9OeaohjsLIyi4aQRPah2a6t0KSanA",
+    "DB_OWNER": "TELLYHUBCLOUD",
+    "DB_NAME": "link_bypass.db"
 }
