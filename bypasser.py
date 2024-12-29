@@ -1599,14 +1599,17 @@ def droplink(url):
 
 
 def linkvertise(url):
-    params = {
-        "url": url,
+    params = {"url": url,
     }
-    response = requests.get("https://bypass.pm/bypass2", params=params).json()
-    if response["success"]:
-        return response["destination"]
-    else:
-        return response["msg"]
+    try:
+        response = requests.get(f"https://api.bypass.vip/bypass?url={url}")
+        response.raise_for_status()
+        result = response.json()
+        return result.get('destination', result.get('msg', 'No valid response received'))
+    except requests.RequestException as e:
+        return f"Failed to connect to the API: {e}"
+    except ValueError as e:
+        return f"Failed to parse JSON response: {e}"
 
 
 ###################################################################################################################
