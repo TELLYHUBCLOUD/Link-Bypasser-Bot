@@ -61,6 +61,7 @@ def discover_and_load_sites():
                         'display_name': module.SITE_NAME,
                         'type': category,
                         'url_regex': pattern,
+                        'compiled_regex': re.compile(pattern, re.IGNORECASE),
                         'callback_function': module.process_url,
                         'module_file': str(py_file.relative_to(src_dir))
                     })
@@ -71,11 +72,13 @@ def discover_and_load_sites():
                 logger.error(f"Failed to load {category} module {py_file}: {e}")
                 
                 # Add a fallback entry so it shows in lists
+                fallback_regex = f'.*{py_file.stem}.*'
                 CONFIG_LIST.append({
                     'name': py_file.stem,
                     'display_name': py_file.stem.title(),
                     'type': category,
-                    'url_regex': f'.*{py_file.stem}.*',
+                    'url_regex': fallback_regex,
+                    'compiled_regex': re.compile(fallback_regex, re.IGNORECASE),
                     'callback_function': lambda url, err=str(e): f"Module {py_file.stem} failed to load: {err}",
                     'module_file': str(py_file.relative_to(src_dir))
                 })
@@ -83,9 +86,38 @@ def discover_and_load_sites():
 def get_function_by_url(url):
     """Get the appropriate function for a URL"""
     for item in CONFIG_LIST:
-        if re.search(item['url_regex'], url, re.IGNORECASE):
+        if item['compiled_regex'].search(url):
             return item['callback_function']
     return None
+
+def process_url(url):
+    """Process a URL using the appropriate handler"""
+    func = get_function_by_url(url)
+    if func:
+        return func(url)
+    return None
+
+def is_type_url(url, type_name):
+    """Check if URL matches a specific type"""
+    for item in CONFIG_LIST:
+        if item['type'] == type_name and item['compiled_regex'].search(url):
+            return True
+    return False
+
+def is_ddl_url(url):
+    """Check if URL is a DDL site"""
+    return is_type_url(url, 'ddl')
+
+def is_freewall_url(url):
+    """Check if URL is a freewall site"""
+    return is_type_url(url, 'freewall')
+
+def is_index_url(url):
+    """Check if URL is an index site"""
+    for item in CONFIG_LIST:
+        if item['name'] == 'index_scraper' and item['compiled_regex'].search(url):
+            return True
+    return False
 
 def get_sites_by_type(site_type):
     """Get all site names of a specific type"""

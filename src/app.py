@@ -14,7 +14,7 @@ app = Flask(__name__)
 def get_bypasser_type(url):
     """Determine bypasser type for a URL"""
     for config in CONFIG_LIST:
-        if re.search(config['url_regex'], url, re.IGNORECASE):
+        if config['compiled_regex'].search(url):
             return config['type']
     return 'bypasser'  # default
 
